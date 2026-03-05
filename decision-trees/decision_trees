@@ -1,0 +1,55 @@
+import pandas as pd
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import MultiLabelBinarizer
+
+mlb = MultiLabelBinarizer()
+
+data = pd.read_csv("../new_data2.csv")
+print(data.head())
+
+room_split = data["room"].str.split(",").apply(lambda x: [s.strip() for s in x])
+room_encoded = pd.DataFrame(mlb.fit_transform(room_split), columns=mlb.classes_)
+
+season_split = data["season"].str.split(",").apply(lambda x: [s.strip() for s in x])
+season_encoded = pd.DataFrame(mlb.fit_transform(season_split), columns=mlb.classes_)
+
+view_with_split = data["view_with"].str.split(",").apply(lambda x: [s.strip() for s in x])
+view_with_encoded = pd.DataFrame(mlb.fit_transform(view_with_split), columns=mlb.classes_)
+
+X = data[[
+    "emotion_intensity",
+    "feel_sombre",
+    "feel_content",
+    "feel_calm",
+    "feel_uneasy",
+    "prominent_colours",
+    "objects_noticed",
+    "willingness_to_pay"
+]]
+
+X = pd.concat([X, room_encoded, season_encoded, view_with_encoded], axis=1)
+
+y = data["painting"]
+
+print(X.shape)
+print(y.shape)
+# Splitting the data into 70/15/15
+X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.30, random_state=42)
+
+# Second split: split the 30% temp into 15% valid, 15% test
+X_valid, X_test, y_valid, y_test = train_test_split(X_temp, y_temp, test_size=0.50, random_state=42)
+
+print("Train:", X_train.shape)
+print("Valid:", X_valid.shape)
+print("Test:", X_test.shape)
+
+model = DecisionTreeClassifier(max_depth=5, min_samples_split=2, random_state=42)
+model.fit(X_train, y_train)
+
+y_valid_pred = model.predict(X_valid)
+print("Validation Accuracy:", accuracy_score(y_valid, y_valid_pred))
+
+y_test_pred = model.predict(X_test)
+print("Test Accuracy:", accuracy_score(y_test, y_test_pred))
