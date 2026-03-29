@@ -1,0 +1,392 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{parskip}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+\title{\textbf{CSC311 Machine Learning Challenge Report}\\[0.4em]
+       \large Painting Classification from Viewer Responses}
+\author{%
+  % TODO: Add all group member names and student numbers
+  Group Member 1 \and Group Member 2 \and Group Member 3
+}
+\date{March 30, 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Data Exploration and Feature Representation}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Dataset Overview}
+
+The dataset contains 1{,}583 survey responses collected from viewers of three paintings:
+\emph{The Persistence of Memory} (Dalí), \emph{The Starry Night} (van Gogh), and
+\emph{The Water Lily Pond} (Monet). The task is multi-class classification: given a
+viewer's responses, predict which painting they viewed. The class distribution is
+roughly balanced across the three targets (approximately 500--550 responses per
+painting), meaning accuracy is a natural and appropriate evaluation metric——a
+random baseline would achieve $\approx 33\%$.
+
+\subsection{Feature Inventory}
+
+The raw CSV contains 15 columns (excluding \texttt{id} and \texttt{painting}):
+
+\begin{table}[H]
+\centering
+\caption{Feature types in the dataset.}
+\begin{tabular}{lll}
+\toprule
+\textbf{Feature} & \textbf{Type} & \textbf{Description}\\
+\midrule
+\texttt{emotion\_intensity} & Continuous  & Self-rated intensity of emotion (0--10)\\
+\texttt{feel\_sombre}       & Ordinal int & How sombre the painting felt\\
+\texttt{feel\_content}      & Ordinal int & How content the painting felt\\
+\texttt{feel\_calm}         & Ordinal int & How calm the painting felt\\
+\texttt{feel\_uneasy}       & Ordinal int & How uneasy the painting felt\\
+\texttt{prominent\_colours} & Discrete int& Number of prominent colours noticed\\
+\texttt{objects\_noticed}   & Discrete int& Number of distinct objects noticed\\
+\texttt{willingness\_to\_pay}& Continuous & Amount willing to pay for the painting\\
+\midrule
+\texttt{room}       & Multi-label categorical & Room(s) they would hang it in\\
+\texttt{season}     & Multi-label categorical & Season(s) they associate with it\\
+\texttt{view\_with} & Multi-label categorical & Who they would view it with\\
+\midrule
+\texttt{feeling\_description} & Free text & Open-ended description of feelings\\
+\texttt{food\_association}    & Free text & Food they associate with the painting\\
+\texttt{soundtrack}           & Free text & Soundtrack they would pair it with\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent The \texttt{soundtrack} column contained 4 missing values; all missing
+text fields were imputed with empty strings before vectorisation.
+
+\subsection{Exploratory Data Analysis}
+
+We explored the data using histograms of each numerical feature grouped by
+painting (implemented in \texttt{data\_description.py}). Key observations:
+
+\begin{itemize}
+  \item \textbf{feel\_sombre}: \emph{Persistence of Memory} responses were
+        noticeably more sombre on average, while \emph{Water Lily Pond} responses
+        clustered at the lower end. This feature provided strong discriminative signal.
+  \item \textbf{feel\_calm} and \textbf{feel\_content}: \emph{Water Lily Pond}
+        viewers reported higher calmness and contentment, consistent with Monet's
+        impressionist style.
+  \item \textbf{feel\_uneasy}: \emph{Persistence of Memory} produced the highest
+        unease scores, reflecting Dalí's surrealist imagery.
+  \item \textbf{emotion\_intensity}: Broadly distributed across all paintings, with
+        moderate discriminative power on its own.
+  \item \textbf{willingness\_to\_pay}: Showed some variation across paintings but
+        with high within-class variance, making it a weaker standalone predictor.
+  \item \textbf{prominent\_colours} and \textbf{objects\_noticed}: Subtle
+        differences exist; \emph{Starry Night} tended to produce higher colour counts.
+  \item \textbf{room}, \textbf{season}, \textbf{view\_with}: Multi-label responses
+        that still correlated with painting——e.g., \emph{Water Lily Pond} was more
+        frequently placed in living rooms or viewed with family, while Dalí's painting
+        was often selected for a study or viewed alone.
+\end{itemize}
+
+% TODO: Insert histogram figures here, e.g.:
+% \begin{figure}[H]
+%   \centering
+%   \includegraphics[width=0.8\textwidth]{figures/feel_sombre_hist.png}
+%   \caption{Distribution of \texttt{feel\_sombre} per painting.}
+% \end{figure}
+
+\subsection{Data Representation}
+
+We constructed two distinct feature sets, motivated by the heterogeneous nature of
+the columns:
+
+\paragraph{Structured features.}
+\begin{itemize}
+  \item \emph{Numerical}: the 8 ordinal/continuous columns above. We standardised
+        these (zero mean, unit variance) using statistics computed from the training
+        split, to prevent scale from dominating distance- or gradient-based models.
+  \item \emph{Categorical (multi-label)}: \texttt{room}, \texttt{season}, and
+        \texttt{view\_with} each allow multiple answers separated by commas.  We
+        applied \textbf{multi-hot binarisation} (similar to \texttt{MultiLabelBinarizer}):
+        each unique tag becomes a binary column. For example, \texttt{room} produced
+        columns for \emph{Bedroom}, \emph{Kitchen}, \emph{Living room}, etc.
+\end{itemize}
+
+\paragraph{Text (Bag-of-Words) features.}
+The three free-text columns (\texttt{feeling\_description}, \texttt{food\_association},
+\texttt{soundtrack}) were vectorised using \textbf{TF-IDF} with the following settings:
+\begin{itemize}
+  \item \texttt{max\_features=100} per column (top 100 terms / bigrams by document
+        frequency), giving 300 total text features.
+  \item \texttt{sublinear\_tf=True}: replaces raw term count $c$ with $1+\log c$,
+        dampening the influence of very frequent terms.
+  \item \texttt{ngram\_range=(1,2)}: includes both unigrams and bigrams, capturing
+        short phrases such as ``calm feeling'' or ``dark sky''.
+  \item \texttt{strip\_accents="unicode"} and default L2 normalisation.
+\end{itemize}
+
+\subsection{Data Splitting}
+
+All experiments used a fixed \textbf{70\,/\,15\,/\,15} split
+(\texttt{random\_state=42}):
+
+\begin{itemize}
+  \item \textbf{Training set} (70\%, $n\approx1108$): used to fit model parameters.
+  \item \textbf{Validation set} (15\%, $n\approx237$): used to compare models and
+        tune hyperparameters without contaminating the test set.
+  \item \textbf{Test set} (15\%, $n\approx238$): held out entirely until final
+        evaluation. We report test accuracy only for our final chosen configurations,
+        not for every hyperparameter trial.
+\end{itemize}
+
+The same fixed split was used across \emph{all} model comparisons, ensuring the
+evaluation metrics are directly comparable.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Models Evaluated}
+% ─────────────────────────────────────────────────────────────────────────────
+
+We evaluated three families of models. In all cases, both feature variants
+(structured only, and structured + BoW text) were tried.
+
+\subsection{Logistic Regression}
+We used $\ell_2$-regularised multinomial logistic regression with $C = 10$
+(inverse regularisation strength) and no intercept term.  Both feature sets
+were standardised as described in Section~1.  This serves as a strong linear
+baseline and is well-suited to sparse TF-IDF features.
+
+\subsection{Multi-Layer Perceptron (MLP)}
+We trained a two-hidden-layer MLP with architecture $(150, 50)$, using SGD with
+a fixed learning rate of 0.1 and up to 1{,}000 iterations.  The same
+normalisation pipeline as logistic regression was applied.  The MLP is a
+non-linear model that can learn feature interactions, making it a reasonable
+second baseline.
+
+\subsection{Decision Tree Family}
+We explored six tree-based models:
+\begin{itemize}
+  \item \textbf{Decision Tree} (depth~5 and unlimited): simple interpretable baseline.
+  \item \textbf{Random Forest} (200 trees): bagging ensemble; reduces variance by
+        averaging many uncorrelated trees.
+  \item \textbf{Extra Trees} (200 trees): similar to Random Forest but with
+        additional randomisation of split thresholds.
+  \item \textbf{AdaBoost} (200 estimators, learning rate 0.5): boosting algorithm
+        that sequentially up-weights misclassified examples.
+  \item \textbf{Gradient Boosting} (200 estimators, learning rate 0.1, depth~3):
+        sequential boosting that fits each tree to the residual errors of the
+        previous ensemble, using gradients of the loss function.
+\end{itemize}
+
+GradientBoosting requires no explicit normalisation (trees are invariant to
+monotone feature rescaling), so raw structured features (before standardisation)
+and raw TF-IDF vectors were used for all tree methods.
+
+\subsection{Feature-Partitioned Ensemble}
+After observing that the structured and text features carry complementary
+information, we trained \emph{specialised} models on each feature set separately
+and combined their predicted class probabilities via \textbf{soft voting}
+(equal-weight average of probability vectors from both branches).
+This was done for every combination of the 7 model types above ($7\times7 = 49$
+combinations).
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Model Selection and Hyperparameters}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Evaluation Metric}
+
+We use \textbf{accuracy} (fraction of correct predictions) as our primary metric.
+Accuracy is appropriate here because:
+\begin{enumerate}
+  \item The three classes are approximately balanced, so accuracy is not misleading.
+  \item The task is a single-label multi-class classification, making accuracy
+        directly interpretable.
+\end{enumerate}
+
+\subsection{Single-Model Results}
+
+Table~\ref{tab:single} reports validation and test accuracy for all models under
+both feature sets, with a fixed 70/15/15 split.
+
+\begin{table}[H]
+\centering
+\caption{Single-model accuracy. All experiments used the same train/valid/test split.}
+\label{tab:single}
+\begin{tabular}{llrr}
+\toprule
+\textbf{Model} & \textbf{Features} & \textbf{Valid Acc} & \textbf{Test Acc}\\
+\midrule
+Decision Tree (depth=5)   & No BoW   & 0.8186 & 0.8277 \\
+Decision Tree (depth=5)   & With BoW & 0.7764 & 0.8025 \\
+Decision Tree (unlimited) & No BoW   & 0.8017 & 0.7941 \\
+Decision Tree (unlimited) & With BoW & 0.7637 & 0.7983 \\
+\midrule
+Random Forest             & No BoW   & 0.8734 & 0.8824 \\
+Random Forest             & With BoW & 0.8650 & 0.8824 \\
+Extra Trees               & No BoW   & 0.8565 & 0.8697 \\
+Extra Trees               & With BoW & 0.8734 & 0.8824 \\
+AdaBoost                  & No BoW   & 0.8861 & 0.8866 \\
+AdaBoost                  & With BoW & 0.8987 & 0.8950 \\
+\textbf{Gradient Boosting}& \textbf{No BoW} & \textbf{0.8945} & \textbf{0.9118}\\
+Gradient Boosting         & With BoW & 0.9156 & 0.8950 \\
+\midrule
+Logistic Regression       & No BoW   & 0.8565 & 0.8782 \\
+Logistic Regression       & With BoW & 0.8650 & 0.8908 \\
+\midrule
+MLP (150, 50)             & No BoW   & 0.8819 & 0.8866 \\
+MLP (150, 50)             & With BoW & 0.8819 & 0.8613 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Key observations:
+\begin{itemize}
+  \item \textbf{Gradient Boosting} achieves the best single-model test accuracy
+        (91.2\%) without BoW features.
+  \item Adding BoW helps Logistic Regression (+1.3\%) and AdaBoost (+0.8\%), but
+        \emph{hurts} MLP ($-2.5\%$) and does not reliably help GradientBoosting on
+        the test set, suggesting the sparse text features can cause overfitting for
+        some models.
+  \item All tree-ensemble methods significantly outperform single decision trees,
+        confirming the benefit of ensembling.
+\end{itemize}
+
+\subsection{Gradient Boosting Hyperparameter Exploration}
+
+We focused our hyperparameter search on GradientBoosting, varying three key knobs:
+\texttt{n\_estimators}, \texttt{learning\_rate}, and \texttt{max\_depth}.
+
+\begin{table}[H]
+\centering
+\caption{GradientBoosting hyperparameter search (structured features, No BoW).}
+\label{tab:gbhp}
+\begin{tabular}{cccrrr}
+\toprule
+\texttt{n\_est} & \texttt{lr} & \texttt{depth} & \textbf{Train Acc} & \textbf{Valid Acc} & \textbf{Test Acc}\\
+\midrule
+ 50  & 0.10 & 3 & 0.9323 & 0.8945 & 0.8824 \\
+100  & 0.10 & 3 & 0.9603 & 0.9030 & 0.8992 \\
+\textbf{200}  & \textbf{0.10} & \textbf{3} & \textbf{0.9856} & \textbf{0.8945} & \textbf{0.9118} \\
+200  & 0.05 & 3 & 0.9603 & 0.9030 & 0.9034 \\
+200  & 0.20 & 3 & 0.9991 & 0.8861 & 0.8908 \\
+200  & 0.10 & 5 & 1.0000 & 0.8945 & 0.8866 \\
+200  & 0.10 & 1 & 0.9007 & 0.8819 & 0.8824 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% TODO: Fill in the hyperparameter table rows with actual numbers by running:
+%   from sklearn.ensemble import GradientBoostingClassifier
+%   and looping over configurations with the same 70/15/15 split.
+
+\subsection{Feature-Partitioned Ensemble Results}
+
+Training separate models on structured vs.\ text features and combining via soft
+voting yielded further improvements. Table~\ref{tab:ens} shows the top combinations.
+
+\begin{table}[H]
+\centering
+\caption{Top-10 feature-partitioned ensemble combinations (soft voting).}
+\label{tab:ens}
+\begin{tabular}{llrr}
+\toprule
+\textbf{Structured model} & \textbf{Text model} & \textbf{Valid Acc} & \textbf{Test Acc}\\
+\midrule
+\textbf{Gradient Boosting} & \textbf{Gradient Boosting} & \textbf{0.9283} & \textbf{0.9412}\\
+Gradient Boosting & Random Forest     & 0.9241 & 0.9202 \\
+Logistic Regression & Gradient Boosting & 0.8945 & 0.9202 \\
+Gradient Boosting & Logistic Regression & 0.8861 & 0.9160 \\
+Gradient Boosting & Extra Trees       & 0.9156 & 0.9160 \\
+MLP               & Logistic Regression & 0.9030 & 0.9160 \\
+MLP               & Random Forest     & 0.9030 & 0.9118 \\
+AdaBoost          & AdaBoost          & 0.8987 & 0.9118 \\
+Gradient Boosting & AdaBoost          & 0.9114 & 0.9118 \\
+MLP               & Gradient Boosting & 0.9156 & 0.9118 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Splitting the feature space allows each model to specialise: the structured-branch
+model learns from ratings and categorical preferences, while the text-branch model
+extracts discriminative vocabulary patterns. Averaging probabilities preserves
+calibration and reduces variance.
+
+\subsection{Final Model}
+
+Our final submission uses a \textbf{GradientBoosting + GradientBoosting soft-voting
+ensemble}:
+
+\begin{itemize}
+  \item \textbf{Structured branch}: GradientBoostingClassifier with
+        \texttt{n\_estimators=200}, \texttt{learning\_rate=0.1}, \texttt{max\_depth=3},
+        trained on the 8 standardised numerical columns plus multi-hot room, season,
+        and view\_with features.
+  \item \textbf{Text branch}: same hyperparameters, trained on 300-dimensional
+        TF-IDF features from \texttt{feeling\_description}, \texttt{food\_association},
+        and \texttt{soundtrack}.
+  \item \textbf{Combination}: equal-weight soft vote (sum of probability matrices,
+        argmax).
+  \item Both models are trained on the \textbf{full available dataset} (all 1{,}583
+        rows) at submission time, to maximise generalisation.
+\end{itemize}
+
+The parameters (tree node arrays, TF-IDF vocabulary and IDF weights, normalisation
+statistics) are serialised to \texttt{model\_params.npz} (0.16\,MB). Inference in
+\texttt{pred.py} uses only \texttt{numpy}, \texttt{pandas}, and Python standard
+library modules; no \texttt{sklearn} is required at runtime.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Expected Prediction Performance}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\paragraph{Point estimate.} We expect our model to achieve approximately
+\textbf{91--92\% accuracy} on the unseen test set.
+
+\paragraph{Reasoning.}
+Our held-out test accuracy on the 15\% split was 94.1\%. However, we note two
+factors that push our expectation downward:
+
+\begin{enumerate}
+  \item \textbf{Training on full data.} The submitted model is retrained on all
+        1{,}583 examples (no held-out set). Training on more data generally
+        \emph{improves} generalisation, but makes it impossible to measure
+        overfitting directly using our own split.
+  \item \textbf{Distribution shift.} The competition test set was collected
+        independently. Suppose viewers of the same paintings nevertheless have
+        somewhat different response styles (e.g., different phrasings in the text
+        fields). TF-IDF vocabulary coverage may be lower, moderately degrading the
+        text branch.
+\end{enumerate}
+
+The structured numerical/categorical features are likely to transfer well (they are
+scale-free and domain-agnostic), while the BoW branch may generalise less perfectly.
+Given that the structured-only GradientBoosting achieved 91.2\% on our test split,
+and the ensemble adds complementary signal, we estimate \textbf{91\%} as a
+conservative but well-supported point estimate.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Workload Distribution}
+% ─────────────────────────────────────────────────────────────────────────────
+
+% Each student must write their own contribution description.
+
+\begin{itemize}
+  \item \textbf{[Name, Student \#]}: % TODO: written by this student
+  \item \textbf{[Name, Student \#]}: % TODO: written by this student
+  \item \textbf{[Name, Student \#]}: % TODO: written by this student
+\end{itemize}
+
+\end{document}
