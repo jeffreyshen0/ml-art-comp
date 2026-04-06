@@ -113,7 +113,7 @@ models = {
     ),
     "AdaBoost": AdaBoostClassifier(
         n_estimators=200, learning_rate=0.5, random_state=RANDOM_STATE
-    ),
+    ),、
 }
 
 # ── Run experiments ────────────────────────────────────────────────────────
@@ -151,3 +151,94 @@ print(
     f"\n🏆 Best model: {best['model']} ({best['features']}) "
     f"→ Valid: {best['valid_acc']:.4f}, Test: {best['test_acc']:.4f}"
 )
+
+# Hyperparameter tuning using Randomized Search
+from sklearn.model_selection import RandomizedSearchCV
+from scipy.stats import randint, uniform
+
+# Define param distributions for each model type
+param_dists = {
+    "DecisionTree": {
+        "max_depth": [3, 5, 10, 15, 20, None],
+        "min_samples_split": randint(2, 20),
+        "min_samples_leaf": randint(1, 10),
+        "criterion": ["gini", "entropy"],
+    },
+    "RandomForest": {
+        "n_estimators": [100, 200, 300],
+        "max_depth": [5, 10, 15, 20, None],
+        "min_samples_split": randint(2, 15),
+        "min_samples_leaf": randint(1, 8),
+        "max_features": ["sqrt", "log2", 0.3, 0.5],
+    },
+    "ExtraTrees": {
+        "n_estimators": [100, 200, 300],
+        "max_depth": [5, 10, 15, 20, None],
+        "min_samples_split": randint(2, 15),
+        "min_samples_leaf": randint(1, 8),
+        "max_features": ["sqrt", "log2", 0.3, 0.5],
+    },
+    "GradientBoosting": {
+        "n_estimators": [100, 200, 300],
+        "learning_rate": uniform(0.01, 0.29),  # 0.01 to 0.3
+        "max_depth": [3, 4, 5, 6],
+        "min_samples_split": randint(2, 15),
+        "subsample": uniform(0.7, 0.3),  # 0.7 to 1.0
+    },
+    "AdaBoost": {
+        "n_estimators": [50, 100, 200, 300],
+        "learning_rate": uniform(0.01, 0.99),  # 0.01 to 1.0
+    },
+}
+
+base_models = {
+    "DecisionTree": DecisionTreeClassifier(random_state=RANDOM_STATE),
+    "RandomForest": RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1),
+    "ExtraTrees": ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1),
+    "GradientBoosting": GradientBoostingClassifier(random_state=RANDOM_STATE),
+    "AdaBoost": AdaBoostClassifier(random_state=RANDOM_STATE),
+}
+
+# Run tuning
+print(f"\n{'=' * 70}")
+print(f"{'Model':<20} {'Valid Acc':>12} {'Test Acc':>12} {'Best Params'}")
+print(f"{'=' * 70}")
+
+best_results = []
+
+# Use With BoW since it performed better
+X = X_with_bow
+X_train, X_valid, X_test, y_train, y_valid, y_test = make_splits(X, y)
+
+for name, base_model in base_models.items():
+    search = RandomizedSearchCV(
+        base_model,
+        param_distributions=param_dists[name],
+        n_iter=30,
+        cv=3,
+        scoring="accuracy",
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        verbose=1,
+    )
+    search.fit(X_train, y_train)
+
+    best_model = search.best_estimator_
+    val_acc = accuracy_score(y_valid, best_model.predict(X_valid))
+    test_acc = accuracy_score(y_test, best_model.predict(X_test))
+
+    best_results.append({
+        "model": name,
+        "val_acc": val_acc,
+        "test_acc": test_acc,
+        "params": search.best_params_,
+    })
+
+    print(f"{name:<20} {val_acc:>12.4f} {test_acc:>12.4f}")
+    print(f"   └─ {search.best_params_}")
+
+print(f"{'=' * 70}")
+
+# Show winner
+best = max(best_results, key=lambda x: x["val_acc"])
+print(f"\n🏆 Best: {best['model']} → Val: {best['val_acc']:.4f}, Test: {best['test_acc']:.4f}")

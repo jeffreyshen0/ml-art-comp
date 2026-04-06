@@ -93,3 +93,35 @@ for feat_label, X in [("No BoW", X_base), ("With BoW", X_with_bow)]:
 
 print(f"{'='*60}")
 
+
+# Hyperparameter tuning using Grid Search
+from sklearn.model_selection import GridSearchCV
+
+param_grid = {
+    "C": [0.01, 0.1, 1, 10, 100],           # inverse regularization strength
+    "penalty": ["l1", "l2"],                 # regularization type
+    "solver": ["liblinear", "saga"],         # solvers that support both l1/l2
+    "fit_intercept": [True, False],
+}
+
+base_model = LogisticRegression(max_iter=1000, random_state=RANDOM_STATE)
+
+search = GridSearchCV(
+    base_model,
+    param_grid=param_grid,
+    cv=3,
+    scoring="accuracy",
+    n_jobs=-1,
+    verbose=2,
+)
+
+search.fit(X_train_n, y_train)
+
+print(f"Best params: {search.best_params_}")
+print(f"Best CV score: {search.best_score_:.4f}")
+
+best_model = search.best_estimator_
+val_acc = accuracy_score(y_valid, best_model.predict(X_valid_n))
+test_acc = accuracy_score(y_test, best_model.predict(X_test_n))
+print(f"Validation: {val_acc:.4f}")
+print(f"Test: {test_acc:.4f}")

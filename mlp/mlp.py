@@ -6,6 +6,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+
 # ── Load data ──────────────────────────────────────────────────────────────
 data = pd.read_csv("../new_data2.csv")
 
@@ -99,3 +100,32 @@ for feat_label, X in [("No BoW", X_base), ("With BoW", X_with_bow)]:
 
 print(f"{'='*60}")
 
+# Hyperparameter Tuning
+from itertools import product
+
+results = []
+for lr in [0.001, 0.01, 0.1]:
+    for alpha in [1e-4, 1e-3, 1e-2]:
+        for layers in [(128,), (150, 50), (128, 64, 32)]:
+            model = MLPClassifier(hidden_layer_sizes=layers, learning_rate_init=lr,
+                                  alpha=alpha, max_iter=1000, random_state=RANDOM_STATE)
+            model.fit(X_train_n, y_train)
+            val_acc = accuracy_score(y_valid, model.predict(X_valid_n))
+            results.append({"lr": lr, "alpha": alpha, "layers": layers, "val_acc": val_acc})
+
+best = max(results, key=lambda x: x["val_acc"])
+print(best)
+
+best_params = {"lr": 0.01, "alpha": 0.0001, "layers": (128, 64, 32)}
+
+final_model = MLPClassifier(
+    hidden_layer_sizes=best_params["layers"],
+    learning_rate_init=best_params["lr"],
+    alpha=best_params["alpha"],
+    max_iter=1000,
+    random_state=RANDOM_STATE,
+)
+final_model.fit(X_train_n, y_train)
+
+print(f"Validation: {accuracy_score(y_valid, final_model.predict(X_valid_n)):.4f}")
+print(f"Test:       {accuracy_score(y_test, final_model.predict(X_test_n)):.4f}")
