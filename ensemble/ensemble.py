@@ -137,7 +137,7 @@ def soft_vote(proba_list, classes):
     return classes[np.argmax(avg, axis=1)]
 
 # ── Run all structured × text combos ──────────────────────────────────────
-header = f"{'Structured model':<15} {'Text model':<15} {'Valid Acc':>10} {'Test Acc':>10}"
+header = f"{'Structured model':<15} {'Text model':<15} {'Train Acc':>10} {'Valid Acc':>10}"
 print("\n" + "=" * len(header))
 print(header)
 print("=" * len(header))
@@ -149,57 +149,57 @@ for struct_name, text_name in product(MODELS.keys(), MODELS.keys()):
     # ── Structured branch ──────────────────────────────────────────────────
     m_struct = MODELS[struct_name]()
     m_struct.fit(Xs_tr_n, y_tr)
+    p_struct_tr = m_struct.predict_proba(Xs_tr_n)
     p_struct_va = m_struct.predict_proba(Xs_va_n)
-    p_struct_te = m_struct.predict_proba(Xs_te_n)
     if classes is None:
         classes = m_struct.classes_
 
     # ── Text branch ───────────────────────────────────────────────────────
     m_text = MODELS[text_name]()
     m_text.fit(Xt_tr_n, y_tr)
+    p_text_tr = m_text.predict_proba(Xt_tr_n)
     p_text_va = m_text.predict_proba(Xt_va_n)
-    p_text_te = m_text.predict_proba(Xt_te_n)
 
     # Align class order between models
     def align_proba(m, proba):
         order = [list(m.classes_).index(c) for c in classes]
         return proba[:, order]
 
+    p_struct_tr = align_proba(m_struct, p_struct_tr)
     p_struct_va = align_proba(m_struct, p_struct_va)
-    p_struct_te = align_proba(m_struct, p_struct_te)
+    p_text_tr   = align_proba(m_text,   p_text_tr)
     p_text_va   = align_proba(m_text,   p_text_va)
-    p_text_te   = align_proba(m_text,   p_text_te)
 
     # ── Soft vote ─────────────────────────────────────────────────────────
+    y_tr_pred = soft_vote([p_struct_tr, p_text_tr], classes)
     y_va_pred = soft_vote([p_struct_va, p_text_va], classes)
-    y_te_pred = soft_vote([p_struct_te, p_text_te], classes)
 
-    val_acc  = accuracy_score(y_va, y_va_pred)
-    test_acc = accuracy_score(y_te, y_te_pred)
+    train_acc = accuracy_score(y_tr, y_tr_pred)
+    val_acc   = accuracy_score(y_va, y_va_pred)
 
     results.append({
         "structured": struct_name,
         "text":       text_name,
+        "train_acc":  train_acc,
         "valid_acc":  val_acc,
-        "test_acc":   test_acc,
     })
-    print(f"{struct_name:<15} {text_name:<15} {val_acc:>10.4f} {test_acc:>10.4f}")
+    print(f"{struct_name:<15} {text_name:<15} {train_acc:>10.4f} {val_acc:>10.4f}")
 
 print("=" * len(header))
 
 # ── Summary ────────────────────────────────────────────────────────────────
-df = pd.DataFrame(results).sort_values("test_acc", ascending=False)
+df = pd.DataFrame(results).sort_values("valid_acc", ascending=False)
 
-print("\n📊 Top-10 combinations by Test Accuracy:")
+print("\n📊 Top-10 combinations by Validation Accuracy:")
 print(df.head(10).to_string(index=False))
 
 best = df.iloc[0]
 print(
     f"\n🏆 Best combo: {best['structured']} (structured) + {best['text']} (text) "
-    f"→ Valid: {best['valid_acc']:.4f}, Test: {best['test_acc']:.4f}"
+    f"→ Train: {best['train_acc']:.4f}, Valid: {best['valid_acc']:.4f}"
 )
 
 # ── Baselines for comparison ───────────────────────────────────────────────
 print("\n📌 Baselines (single model, best from prior runs):")
-print(f"  GradientBoosting alone (No BoW) → Test: 0.9118")
-print(f"  GradientBoosting alone (BoW)    → Test: 0.8950")
+print(f"  GradientBoosting alone (No BoW) → Valid: 0.9118")
+print(f"  GradientBoosting alone (BoW)    → Valid: 0.8950")

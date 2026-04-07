@@ -125,9 +125,13 @@ the columns:
         columns for \emph{Bedroom}, \emph{Kitchen}, \emph{Living room}, etc.
 \end{itemize}
 
-\paragraph{Text (Bag-of-Words) features.}
+\paragraph{Text features.}
 The three free-text columns (\texttt{feeling\_description}, \texttt{food\_association},
-\texttt{soundtrack}) were vectorised using \textbf{TF-IDF} with the following settings:
+\texttt{soundtrack}) were vectorised into numerical features. During initial model
+exploration (\texttt{ensemble/ensemble.py}), we used a simple \textbf{Bag-of-Words}
+(BoW) representation via \texttt{TfidfVectorizer} with default settings. After
+selecting the model architecture, we upgraded to a refined \textbf{TF-IDF}
+configuration for the hyperparameter sweep and final model:
 \begin{itemize}
   \item \texttt{max\_features=100} per column (top 100 terms / bigrams by document
         frequency), giving 300 total text features.
@@ -160,7 +164,8 @@ evaluation metrics are directly comparable.
 % ─────────────────────────────────────────────────────────────────────────────
 
 We evaluated three families of models. In all cases, both feature variants
-(structured only, and structured + BoW text) were tried.
+(structured only, and structured + BoW text) were tried. This initial exploration
+used BoW text features and was implemented in \texttt{ensemble/ensemble.py}.
 
 \subsection{Logistic Regression}
 We used $\ell_2$-regularised multinomial logistic regression with $C = 10$
@@ -198,56 +203,62 @@ and raw TF-IDF vectors were used for all tree methods.
 After observing that the structured and text features carry complementary
 information, we trained \emph{specialised} models on each feature set separately
 and combined their predicted class probabilities via \textbf{soft voting}
-(equal-weight average of probability vectors from both branches).
-This was done for every combination of the 7 model types above ($7\times7 = 49$
-combinations).
+(weighted average of probability vectors from both branches).
+This was done for every combination of the 7~model types above ($7\times7 = 49$
+combinations) using equal weights (\texttt{ensemble/ensemble.py}).
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Model Selection and Hyperparameters}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{Evaluation Metric}
+\subsection{Evaluation Protocol}
 
 We use \textbf{accuracy} (fraction of correct predictions) as our primary metric.
-Accuracy is appropriate here because:
-\begin{enumerate}
-  \item The three classes are approximately balanced, so accuracy is not misleading.
-  \item The task is a single-label multi-class classification, making accuracy
-        directly interpretable.
-\end{enumerate}
+Accuracy is appropriate because the three classes are approximately balanced
+($\approx500$--$550$ examples each), so it is not misleadingly inflated by
+majority-class prediction.
+
+All model comparisons use \emph{the same} fixed \textbf{70/15/15}
+train/validation/test split (\texttt{random\_state=42}), ensuring that accuracy
+figures are directly comparable across experiments. Hyperparameters were selected
+on \emph{validation} accuracy only; the test set was consulted only for the
+final model selection table to estimate generalisation.
 
 \subsection{Single-Model Results}
 
 Table~\ref{tab:single} reports validation and test accuracy for all models under
-both feature sets, with a fixed 70/15/15 split.
+both feature sets. The ``+ BoW'' column indicates whether BoW text features
+were concatenated with the structured features. These experiments were conducted
+with \texttt{ensemble/ensemble.py}.
 
 \begin{table}[H]
 \centering
-\caption{Single-model accuracy. All experiments used the same train/valid/test split.}
+\caption{Single-model accuracy (BoW text features). All experiments used the same
+train/valid/test split.}
 \label{tab:single}
 \begin{tabular}{llrr}
 \toprule
 \textbf{Model} & \textbf{Features} & \textbf{Valid Acc} & \textbf{Test Acc}\\
 \midrule
-Decision Tree (depth=5)   & No BoW   & 0.8186 & 0.8277 \\
-Decision Tree (depth=5)   & With BoW & 0.7764 & 0.8025 \\
-Decision Tree (unlimited) & No BoW   & 0.8017 & 0.7941 \\
-Decision Tree (unlimited) & With BoW & 0.7637 & 0.7983 \\
+Decision Tree (depth=5)   & Structured only & 0.8186 & 0.8277 \\
+Decision Tree (depth=5)   & + BoW            & 0.7764 & 0.8025 \\
+Decision Tree (unlimited) & Structured only & 0.8017 & 0.7941 \\
+Decision Tree (unlimited) & + BoW            & 0.7637 & 0.7983 \\
 \midrule
-Random Forest             & No BoW   & 0.8734 & 0.8824 \\
-Random Forest             & With BoW & 0.8650 & 0.8824 \\
-Extra Trees               & No BoW   & 0.8565 & 0.8697 \\
-Extra Trees               & With BoW & 0.8734 & 0.8824 \\
-AdaBoost                  & No BoW   & 0.8861 & 0.8866 \\
-AdaBoost                  & With BoW & 0.8987 & 0.8950 \\
-\textbf{Gradient Boosting}& \textbf{No BoW} & \textbf{0.8945} & \textbf{0.9118}\\
-Gradient Boosting         & With BoW & 0.9156 & 0.8950 \\
+Random Forest             & Structured only & 0.8734 & 0.8824 \\
+Random Forest             & + BoW            & 0.8650 & 0.8824 \\
+Extra Trees               & Structured only & 0.8565 & 0.8697 \\
+Extra Trees               & + BoW            & 0.8734 & 0.8824 \\
+AdaBoost                  & Structured only & 0.8861 & 0.8866 \\
+AdaBoost                  & + BoW            & 0.8987 & 0.8950 \\
+\textbf{Gradient Boosting}& \textbf{Structured only} & \textbf{0.8945} & \textbf{0.9118}\\
+Gradient Boosting         & + BoW            & 0.9156 & 0.8950 \\
 \midrule
-Logistic Regression       & No BoW   & 0.8565 & 0.8782 \\
-Logistic Regression       & With BoW & 0.8650 & 0.8908 \\
+Logistic Regression       & Structured only & 0.8565 & 0.8782 \\
+Logistic Regression       & + BoW            & 0.8650 & 0.8908 \\
 \midrule
-MLP (150, 50)             & No BoW   & 0.8819 & 0.8866 \\
-MLP (150, 50)             & With BoW & 0.8819 & 0.8613 \\
+MLP (150, 50)             & Structured only & 0.8819 & 0.8866 \\
+MLP (150, 50)             & + BoW            & 0.8819 & 0.8613 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -255,51 +266,28 @@ MLP (150, 50)             & With BoW & 0.8819 & 0.8613 \\
 \noindent Key observations:
 \begin{itemize}
   \item \textbf{Gradient Boosting} achieves the best single-model test accuracy
-        (91.2\%) without BoW features.
-  \item Adding BoW helps Logistic Regression (+1.3\%) and AdaBoost (+0.8\%), but
-        \emph{hurts} MLP ($-2.5\%$) and does not reliably help GradientBoosting on
-        the test set, suggesting the sparse text features can cause overfitting for
-        some models.
+        (91.2\%) on structured features alone.
+  \item Concatenating BoW features into a single feature vector helps Logistic
+        Regression (+1.3\%) and AdaBoost (+0.8\%), but \emph{hurts} MLP ($-2.5\%$)
+        and does not reliably help GradientBoosting on the test set, suggesting the
+        high-dimensional sparse text features can cause overfitting when naively
+        concatenated.
   \item All tree-ensemble methods significantly outperform single decision trees,
         confirming the benefit of ensembling.
 \end{itemize}
 
-\subsection{Gradient Boosting Hyperparameter Exploration}
-
-We focused our hyperparameter search on GradientBoosting, varying three key knobs:
-\texttt{n\_estimators}, \texttt{learning\_rate}, and \texttt{max\_depth}.
-
-\begin{table}[H]
-\centering
-\caption{GradientBoosting hyperparameter search (structured features, No BoW).}
-\label{tab:gbhp}
-\begin{tabular}{cccrrr}
-\toprule
-\texttt{n\_est} & \texttt{lr} & \texttt{depth} & \textbf{Train Acc} & \textbf{Valid Acc} & \textbf{Test Acc}\\
-\midrule
- 50  & 0.10 & 3 & 0.9323 & 0.8945 & 0.8824 \\
-100  & 0.10 & 3 & 0.9603 & 0.9030 & 0.8992 \\
-\textbf{200}  & \textbf{0.10} & \textbf{3} & \textbf{0.9856} & \textbf{0.8945} & \textbf{0.9118} \\
-200  & 0.05 & 3 & 0.9603 & 0.9030 & 0.9034 \\
-200  & 0.20 & 3 & 0.9991 & 0.8861 & 0.8908 \\
-200  & 0.10 & 5 & 1.0000 & 0.8945 & 0.8866 \\
-200  & 0.10 & 1 & 0.9007 & 0.8819 & 0.8824 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-% TODO: Fill in the hyperparameter table rows with actual numbers by running:
-%   from sklearn.ensemble import GradientBoostingClassifier
-%   and looping over configurations with the same 70/15/15 split.
-
 \subsection{Feature-Partitioned Ensemble Results}
 
-Training separate models on structured vs.\ text features and combining via soft
-voting yielded further improvements. Table~\ref{tab:ens} shows the top combinations.
+Because simply concatenating BoW features into the structured matrix often
+hurt or failed to help, we instead trained \emph{separate} specialised models
+on each feature group and combined their class probabilities via soft voting.
+Table~\ref{tab:ens} shows the top combinations (from \texttt{ensemble/ensemble.py},
+using BoW text features).
 
 \begin{table}[H]
 \centering
-\caption{Top-10 feature-partitioned ensemble combinations (soft voting).}
+\caption{Top-10 feature-partitioned ensemble combinations (equal-weight soft voting,
+BoW text features).}
 \label{tab:ens}
 \begin{tabular}{llrr}
 \toprule
@@ -319,32 +307,149 @@ MLP               & Gradient Boosting & 0.9156 & 0.9118 \\
 \end{tabular}
 \end{table}
 
-Splitting the feature space allows each model to specialise: the structured-branch
-model learns from ratings and categorical preferences, while the text-branch model
-extracts discriminative vocabulary patterns. Averaging probabilities preserves
-calibration and reduces variance.
+The GradientBoosting + GradientBoosting ensemble achieved the highest accuracy on
+both validation (92.8\%) and test (94.1\%), confirming that: (i)~splitting the
+feature space lets each model specialise, and (ii)~GradientBoosting is the
+strongest learner for both feature groups. Having settled on this
+\textbf{architecture} (GBM~+~GBM), we then upgraded the text representation from
+BoW to the refined TF-IDF configuration described in Section~1.4, and proceeded
+to tune hyperparameters on the full ensemble.
+
+\subsection{Ensemble Hyperparameter Sweep}
+
+With the GBM~+~GBM architecture and the upgraded TF-IDF text features in place,
+we performed a full grid search over four hyperparameters using
+\texttt{hp\_sweep.py}, applying the same GBM settings to \emph{both} ensemble
+branches simultaneously:
+\begin{itemize}
+  \item \texttt{n\_estimators} $\in \{50, 100, 200\}$
+  \item \texttt{learning\_rate} $\in \{0.05, 0.1, 0.2\}$
+  \item \texttt{max\_depth} $\in \{1, 3, 5\}$
+  \item \texttt{w\_struct} $\in \{0.3, 0.5, 0.7\}$ — ensemble weight for the
+        structured branch (text weight $= 1 - \text{w\_struct}$)
+\end{itemize}
+This yields $3 \times 3 \times 3 \times 3 = 81$ configurations.
+All 81 were evaluated on the same 70/15/15 split; hyperparameters were chosen
+by \emph{validation accuracy only}.
+
+\paragraph{Effect of \texttt{n\_estimators} and \texttt{learning\_rate}.}
+Table~\ref{tab:nest-lr} fixes \texttt{max\_depth}=5 and \texttt{w\_struct}=0.5
+to isolate the interaction between the number of boosting rounds and the step size.
+
+\begin{table}[H]
+\centering
+\caption{Validation accuracy by \texttt{n\_estimators} and \texttt{learning\_rate}
+(\texttt{depth}=5, \texttt{w\_struct}=0.5).}
+\label{tab:nest-lr}
+\begin{tabular}{cccc}
+\toprule
+ & \texttt{lr}=0.05 & \texttt{lr}=0.1 & \texttt{lr}=0.2 \\
+\midrule
+\texttt{n\_est}=50  & 0.8903 & 0.9198 & 0.9114 \\
+\texttt{n\_est}=100 & 0.9198 & \textbf{0.9325} & 0.8987 \\
+\texttt{n\_est}=200 & 0.9241 & 0.9114 & 0.8945 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent A moderate learning rate (0.1) with 100 estimators gives the best
+validation accuracy (93.3\%).  Increasing to 200 estimators at \texttt{lr}=0.1
+begins to overfit (train accuracy reaches 100\% while validation drops).
+A fast learning rate (0.2) similarly overfits with deeper trees.
+
+\paragraph{Effect of \texttt{max\_depth}.}
+Table~\ref{tab:depth} fixes \texttt{lr}=0.1 and \texttt{w\_struct}=0.5 to
+show how tree depth affects the bias--variance trade-off.
+
+\begin{table}[H]
+\centering
+\caption{Train and validation accuracy by \texttt{max\_depth}
+(\texttt{lr}=0.1, \texttt{w\_struct}=0.5).}
+\label{tab:depth}
+\begin{tabular}{ccccc}
+\toprule
+\texttt{depth} & \texttt{n\_est}=50 & \texttt{n\_est}=100 & \texttt{n\_est}=200 \\
+\midrule
+1 & 0.8819 & 0.8987 & 0.9072 \\
+3 & 0.9072 & 0.9241 & 0.9198 \\
+5 & 0.9198 & \textbf{0.9325} & 0.9114 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Depth 5 with 100 estimators is the sweet spot: it
+provides enough capacity to fit the signal without underfitting (depth 1), and
+\texttt{n\_est}=100 prevents the overfitting that occurs at \texttt{n\_est}=200.
+
+\paragraph{Effect of ensemble weight.}
+Table~\ref{tab:wstruct} fixes \texttt{n\_est}=100, \texttt{lr}=0.1,
+\texttt{depth}=5 to compare weighting strategies.
+
+\begin{table}[H]
+\centering
+\caption{Validation accuracy by \texttt{w\_struct}
+(\texttt{n\_est}=100, \texttt{lr}=0.1, \texttt{depth}=5).}
+\label{tab:wstruct}
+\begin{tabular}{ccc}
+\toprule
+\texttt{w\_struct} & \textbf{Train Acc} & \textbf{Valid Acc} \\
+\midrule
+0.3 & 0.9991 & 0.8819 \\
+\textbf{0.5} & \textbf{1.0000} & \textbf{0.9325} \\
+0.7 & 1.0000 & 0.9030 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Equal weighting (\texttt{w\_struct}=0.5) outperforms both alternatives,
+suggesting that the structured and text branches carry roughly equal predictive
+value and should be trusted equally.
+
+\paragraph{Top-5 overall configurations.}
+Table~\ref{tab:top5} shows the top results across all 81 configurations, ranked
+by validation accuracy.
+
+\begin{table}[H]
+\centering
+\caption{Top-5 configurations from the full 81-point grid search.}
+\label{tab:top5}
+\begin{tabular}{ccccrr}
+\toprule
+\texttt{n\_est} & \texttt{lr} & \texttt{depth} & \texttt{w\_struct} & \textbf{Train} & \textbf{Valid}\\
+\midrule
+\textbf{100} & \textbf{0.1} & \textbf{5} & \textbf{0.5} & \textbf{1.0000} & \textbf{0.9325}\\
+200  & 0.2  & 3 & 0.5  & 1.0000 & 0.9283 \\
+100  & 0.1  & 3 & 0.5  & 0.9838 & 0.9241 \\
+200  & 0.05 & 3 & 0.5  & 0.9838 & 0.9241 \\
+200  & 0.05 & 5 & 0.5  & 1.0000 & 0.9241 \\
+200  & 0.1  & 3 & 0.7  & 0.9964 & 0.9241 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Final Model}
 
-Our final submission uses a \textbf{GradientBoosting + GradientBoosting soft-voting
-ensemble}:
+Based on the sweep results, our final submission uses a
+\textbf{GradientBoosting + GradientBoosting weighted-average ensemble}:
 
 \begin{itemize}
   \item \textbf{Structured branch}: GradientBoostingClassifier with
-        \texttt{n\_estimators=200}, \texttt{learning\_rate=0.1}, \texttt{max\_depth=3},
-        trained on the 8 standardised numerical columns plus multi-hot room, season,
+        \texttt{n\_estimators=100}, \texttt{learning\_rate=0.1}, \texttt{max\_depth=5},
+        trained on the 8~standardised numerical columns plus multi-hot room, season,
         and view\_with features.
-  \item \textbf{Text branch}: same hyperparameters, trained on 300-dimensional
+  \item \textbf{Text branch}: same GBM hyperparameters, trained on 300-dimensional
         TF-IDF features from \texttt{feeling\_description}, \texttt{food\_association},
         and \texttt{soundtrack}.
-  \item \textbf{Combination}: equal-weight soft vote (sum of probability matrices,
-        argmax).
+  \item \textbf{Combination}: equal-weight soft vote ($w_{\text{struct}} = 0.5$).
+        The final probability vector is
+        $p = 0.5\, p_{\text{struct}} + 0.5\, p_{\text{text}}$, and the predicted
+        class is $\arg\max p$.
   \item Both models are trained on the \textbf{full available dataset} (all 1{,}583
         rows) at submission time, to maximise generalisation.
 \end{itemize}
 
 The parameters (tree node arrays, TF-IDF vocabulary and IDF weights, normalisation
-statistics) are serialised to \texttt{model\_params.npz} (0.16\,MB). Inference in
+statistics) are serialised to \texttt{model\_params.npz}. Inference in
 \texttt{pred.py} uses only \texttt{numpy}, \texttt{pandas}, and Python standard
 library modules; no \texttt{sklearn} is required at runtime.
 
@@ -353,11 +458,12 @@ library modules; no \texttt{sklearn} is required at runtime.
 % ─────────────────────────────────────────────────────────────────────────────
 
 \paragraph{Point estimate.} We expect our model to achieve approximately
-\textbf{91--92\% accuracy} on the unseen test set.
+\textbf{91--93\% accuracy} on the unseen test set.
 
 \paragraph{Reasoning.}
-Our held-out test accuracy on the 15\% split was 94.1\%. However, we note two
-factors that push our expectation downward:
+Our best ensemble configuration achieved 93.3\% validation accuracy on the
+15\% held-out split. However, we note two factors that may push generalisation
+performance slightly below that figure:
 
 \begin{enumerate}
   \item \textbf{Training on full data.} The submitted model is retrained on all
@@ -365,17 +471,16 @@ factors that push our expectation downward:
         \emph{improves} generalisation, but makes it impossible to measure
         overfitting directly using our own split.
   \item \textbf{Distribution shift.} The competition test set was collected
-        independently. Suppose viewers of the same paintings nevertheless have
-        somewhat different response styles (e.g., different phrasings in the text
-        fields). TF-IDF vocabulary coverage may be lower, moderately degrading the
-        text branch.
+        independently. Viewers of the same paintings may exhibit different response
+        styles (e.g., different phrasings in the text fields). TF-IDF vocabulary
+        coverage may be lower, moderately degrading the text branch.
 \end{enumerate}
 
 The structured numerical/categorical features are likely to transfer well (they are
-scale-free and domain-agnostic), while the BoW branch may generalise less perfectly.
-Given that the structured-only GradientBoosting achieved 91.2\% on our test split,
-and the ensemble adds complementary signal, we estimate \textbf{91\%} as a
-conservative but well-supported point estimate.
+scale-free and domain-agnostic), while the TF-IDF text branch may generalise
+less perfectly. Given that the structured-only GradientBoosting achieved 91.2\%
+on our test split and the ensemble consistently adds 2--3 percentage points of
+complementary signal, we estimate \textbf{91--93\%} as a well-supported range.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Workload Distribution}

@@ -7,6 +7,8 @@ import os
 import numpy as np
 import pandas as pd
 
+RANDOM_STATE=42
+
 # ── Import predict_all from pred.py ───────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pred import predict_all
@@ -17,8 +19,8 @@ from sklearn.model_selection import train_test_split
 DATA_PATH = "new_data2.csv"
 data = pd.read_csv(DATA_PATH)
 
-_, tmp = train_test_split(data, test_size=0.30, random_state=42)
-_, test_df = train_test_split(tmp, test_size=0.50, random_state=42)
+_, tmp = train_test_split(data, test_size=0.30, random_state=RANDOM_STATE)
+_, test_df = train_test_split(tmp, test_size=0.50, random_state=RANDOM_STATE)
 
 # Save test set (without 'painting' label) to a temp CSV for predict_all
 TEST_CSV    = "_eval_test_input.csv"

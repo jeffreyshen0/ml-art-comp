@@ -13,7 +13,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import accuracy_score
 
 RANDOM_STATE = 42
-N_ESTIMATORS = 200
+N_ESTIMATORS = 100
+LEARNING_RATE = 0.1
+MAX_DEPTH = 5
 data = pd.read_csv("new_data2.csv")
 
 # ── 70 / 15 / 15  train / val / test split ───────────────────────────────────
@@ -26,63 +28,82 @@ print(f"Split sizes  → train: {len(train_df)}  val: {len(val_df)}  test: {len(
 def fit_multilabel(df, col):
     mlb = MultiLabelBinarizer()
     split = df[col].str.split(",").apply(lambda x: [s.strip() for s in x])
-    return mlb.fit_transform(split), mlb.classes_
+    mlb.fit(split)
+    return mlb
 
-room_enc,   room_classes   = fit_multilabel(data, "room")
-season_enc, season_classes = fit_multilabel(data, "season")
-view_enc,   view_classes   = fit_multilabel(data, "view_with")
+def apply_multilabel(mlb, df, col):
+    split = df[col].str.split(",").apply(lambda x: [s.strip() for s in x])
+    return mlb.transform(split)
+
+mlb_room   = fit_multilabel(train_df, "room")
+mlb_season = fit_multilabel(train_df, "season")
+mlb_view   = fit_multilabel(train_df, "view_with")
+
+room_classes   = mlb_room.classes_
+season_classes = mlb_season.classes_
+view_classes   = mlb_view.classes_
 
 NUMERICAL_COLS = [
     "emotion_intensity","feel_sombre","feel_content","feel_calm",
     "feel_uneasy","prominent_colours","objects_noticed","willingness_to_pay",
 ]
-X_num = data[NUMERICAL_COLS].values.astype(float)
-struct_mean = X_num.mean(0); struct_std = X_num.std(0); struct_std[struct_std==0] = 1.0
-X_num_norm  = (X_num - struct_mean) / struct_std
-X_structured = np.hstack([X_num_norm, room_enc, season_enc, view_enc]).astype(float)
+X_num_tr = train_df[NUMERICAL_COLS].values.astype(float)
+struct_mean = X_num_tr.mean(0)
+struct_std  = X_num_tr.std(0)
+struct_std[struct_std == 0] = 1.0
+
+def build_structured(df, mlb_room, mlb_season, mlb_view):
+    X_num = df[NUMERICAL_COLS].values.astype(float)
+    X_num_norm = (X_num - struct_mean) / struct_std
+    room_enc   = apply_multilabel(mlb_room,   df, "room")
+    season_enc = apply_multilabel(mlb_season, df, "season")
+    view_enc   = apply_multilabel(mlb_view,   df, "view_with")
+    return np.hstack([X_num_norm, room_enc, season_enc, view_enc]).astype(float)
+
+X_struct_tr = build_structured(train_df, mlb_room, mlb_season, mlb_view)
+X_struct_va = build_structured(val_df,   mlb_room, mlb_season, mlb_view)
+X_struct_te = build_structured(test_df,  mlb_room, mlb_season, mlb_view)
 
 # ── TF-IDF text features ──────────────────────────────────────────────────
 TEXT_COLS = ["feeling_description", "food_association", "soundtrack"]
 for col in TEXT_COLS:
     data[col] = data[col].fillna("")
 
-tfidf_vecs, text_mats = {}, []
+tfidf_vecs = {}
 for col in TEXT_COLS:
     vec = TfidfVectorizer(max_features=100, sublinear_tf=True,
                           strip_accents="unicode", ngram_range=(1, 2))
-    mat = vec.fit_transform(data[col]).toarray()
+    vec.fit(train_df[col].fillna(""))
     tfidf_vecs[col] = vec
-    text_mats.append(mat)
-X_text = np.hstack(text_mats)
+
+def build_text(df):
+    return np.hstack([
+        tfidf_vecs[col].transform(df[col].fillna("")).toarray()
+        for col in TEXT_COLS
+    ])
+
+X_text_tr = build_text(train_df)
+X_text_va = build_text(val_df)
+X_text_te = build_text(test_df)
 
 # ── Build per-split labels ────────────────────────────────────────────────
-y_all   = data["painting"].values
 y_train = train_df["painting"].values
 y_val   = val_df["painting"].values
 y_test  = test_df["painting"].values
 
-# Align feature matrices to each split using index
-train_idx = train_df.index
-val_idx   = val_df.index
-test_idx  = test_df.index
-
-X_struct_tr = X_structured[train_idx]
-X_struct_va = X_structured[val_idx]
-X_struct_te = X_structured[test_idx]
-X_text_tr   = X_text[train_idx]
-X_text_va   = X_text[val_idx]
-X_text_te   = X_text[test_idx]
-
 # ── Train on train split only ─────────────────────────────────────────────
 print("Training structured model...")
-m_struct = GradientBoostingClassifier(n_estimators=N_ESTIMATORS, learning_rate=0.1,
-                                       max_depth=3, random_state=RANDOM_STATE)
+m_struct = GradientBoostingClassifier(n_estimators=N_ESTIMATORS, learning_rate=LEARNING_RATE,
+                                       max_depth=MAX_DEPTH, random_state=RANDOM_STATE)
 m_struct.fit(X_struct_tr, y_train)
 
 print("Training text model...")
-m_text = GradientBoostingClassifier(n_estimators=N_ESTIMATORS, learning_rate=0.1,
-                                     max_depth=3, random_state=RANDOM_STATE)
+m_text = GradientBoostingClassifier(n_estimators=N_ESTIMATORS, learning_rate=LEARNING_RATE,
+                                     max_depth=MAX_DEPTH, random_state=RANDOM_STATE)
 m_text.fit(X_text_tr, y_train)
+
+assert np.array_equal(m_struct.classes_, m_text.classes_), \
+    f"Class order mismatch: {m_struct.classes_} vs {m_text.classes_}"
 
 def _ensemble_acc(Xs, Xt, y_true):
     sp = m_struct.predict_proba(Xs)
@@ -93,9 +114,6 @@ def _ensemble_acc(Xs, Xt, y_true):
 print(f"Ensemble train accuracy : {_ensemble_acc(X_struct_tr, X_text_tr, y_train):.4f}")
 print(f"Ensemble val   accuracy : {_ensemble_acc(X_struct_va, X_text_va, y_val):.4f}")
 print(f"Ensemble test  accuracy : {_ensemble_acc(X_struct_te, X_text_te, y_test):.4f}")
-
-# Use the full dataset arrays for index alignment in tree extraction
-y = y_all
 
 # ── Extract tree arrays ───────────────────────────────────────────────────
 def extract_trees(model):
