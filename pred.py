@@ -110,6 +110,44 @@ def _gb_proba(X, feat, thresh, left, right, val, lr, init_raw):
     e = np.exp(raw)
     return e / e.sum(1, keepdims=True)
 
+# process test set
+def preprocess(filename: str) -> pd.DataFrame:
+    df = pd.read_csv(filename)
+
+    # ── 2. Rename columns ────────────────────────────────────────────────────
+    df.columns = [
+        "id", "painting", "emotion_intensity", "feeling_description",
+        "feel_sombre", "feel_content", "feel_calm", "feel_uneasy",
+        "prominent_colours", "objects_noticed", "willingness_to_pay",
+        "room", "view_with", "season", "food_association", "soundtrack"
+    ]
+
+    # ── 3. Convert empty/whitespace strings to NaN ───────────────────────────
+    str_cols = df.select_dtypes(include="str").columns
+    df[str_cols] = df[str_cols].apply(lambda col: col.str.strip()).replace("", pd.NA)
+
+    # ── 4. Clean Likert columns (extract leading digit) ──────────────────────
+    likert_cols = ["feel_sombre", "feel_content", "feel_calm", "feel_uneasy"]
+    df[likert_cols] = df[likert_cols].apply(
+        lambda col: pd.to_numeric(col.astype(str).str.extract(r"^(\d)", expand=False), errors="coerce")
+    )
+
+    # ── 5. Clean willingness_to_pay ──────────────────────────────────────────
+    df["willingness_to_pay"] = (
+        df["willingness_to_pay"]
+        .astype(str)
+        .str.replace(r"[$,]",          "", regex=True)
+        .str.replace(r"(?i)dollars?\.?", "", regex=True)
+        .str.extract(r"(-?\d+(?:\.\d+)?)", expand=False)
+        .pipe(pd.to_numeric, errors="coerce")
+    )
+
+    # ── 6. Validate emotion_intensity (must be 1–10) ─────────────────────────
+    emotion = pd.to_numeric(df["emotion_intensity"], errors="coerce")
+    df["emotion_intensity"] = emotion.where(emotion.between(1, 10))
+
+    return df
+
 # ── Public API ────────────────────────────────────────────────────────────────
 def predict_all(filename):
     """
@@ -117,8 +155,7 @@ def predict_all(filename):
     Paintings are one of:
       'The Persistence of Memory', 'The Starry Night', 'The Water Lily Pond'
     """
-    df = pd.read_csv(filename)
-    df = df.reset_index(drop=True)
+    df = preprocess(filename)
 
     X_struct = _build_structured_features(df)
     X_text   = _build_text_features(df)
